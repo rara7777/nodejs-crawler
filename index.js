@@ -26,7 +26,7 @@ async function crawlUrl(url) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
       },
-      timeout: 1000 // 1 秒超時
+      timeout: 1500 // 1.5 秒超時
     })
     const $ = cheerio.load(response.data)
 
