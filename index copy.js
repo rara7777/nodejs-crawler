@@ -131,13 +131,14 @@ fastify.post('/crawl', async (request, reply) => {
   return { results }
 })
 
-// 健康檢查端點
-fastify.get('/health', async () => {
-  return { status: 'ok' }
-})
-
-// 導出 serverless 處理函數
-module.exports = async (req, res) => {
-  await fastify.ready()
-  fastify.server.emit('request', req, res)
+// 啟動服務器
+const start = async () => {
+  try {
+    await fastify.listen({ port: 3000, host: '0.0.0.0' })
+  } catch (err) {
+    fastify.log.error(err)
+    process.exit(1)
+  }
 }
+
+start()
