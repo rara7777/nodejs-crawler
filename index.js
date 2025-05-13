@@ -1,7 +1,7 @@
 const fastify = require('fastify')({ logger: true })
 const cheerio = require('cheerio')
 const axios = require('axios')
-const pLimit = require('p-limit').default
+const pLimit = require('p-limit')
 
 // 註冊 CORS
 fastify.register(require('@fastify/cors'), {
@@ -24,7 +24,8 @@ async function crawlUrl(url) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
-      }
+      },
+      timeout: 5000 // 設置 5 秒超時
     })
     const $ = cheerio.load(response.data)
 
@@ -115,20 +116,28 @@ async function crawlUrl(url) {
 
 // API 路由
 fastify.post('/crawl', async (request, reply) => {
-  const { urls } = request.body
+  try {
+    const { urls } = request.body
 
-  if (!Array.isArray(urls) || urls.length === 0) {
-    return reply.code(400).send({ error: '請提供有效的 URL 陣列' })
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return reply.code(400).send({ error: '請提供有效的 URL 陣列' })
+    }
+
+    // 限制並發請求數量為 3（Vercel 環境下建議降低並發數）
+    const limit = pLimit(3)
+
+    // 並發處理所有 URL
+    const promises = urls.map(url => limit(() => crawlUrl(url)))
+    const results = await Promise.all(promises)
+
+    return { results }
+  } catch (error) {
+    fastify.log.error(error)
+    return reply.code(500).send({
+      error: 'Internal Server Error',
+      message: error.message
+    })
   }
-
-  // 限制並發請求數量為 5
-  const limit = pLimit(5)
-
-  // 並發處理所有 URL
-  const promises = urls.map(url => limit(() => crawlUrl(url)))
-  const results = await Promise.all(promises)
-
-  return { results }
 })
 
 // 健康檢查端點
@@ -138,6 +147,14 @@ fastify.get('/health', async () => {
 
 // 導出 serverless 處理函數
 module.exports = async (req, res) => {
-  await fastify.ready()
-  fastify.server.emit('request', req, res)
+  try {
+    await fastify.ready()
+    fastify.server.emit('request', req, res)
+  } catch (error) {
+    res.statusCode = 500
+    res.end(JSON.stringify({
+      error: 'Internal Server Error',
+      message: error.message
+    }))
+  }
 }
