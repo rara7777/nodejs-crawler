@@ -19,13 +19,14 @@ function cleanText(text) {
 // 爬蟲函數
 async function crawlUrl(url) {
   try {
+    // 設置 1 秒超時
     const response = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
       },
-      timeout: 5000 // 設置 5 秒超時
+      timeout: 1000 // 1 秒超時
     })
     const $ = cheerio.load(response.data)
 
@@ -66,17 +67,19 @@ async function crawlUrl(url) {
       mainElement = $('body')
     }
 
-    // 3. 提取段落文字
+    // 3. 提取段落文字（限制數量）
     const paragraphs = mainElement.find('p')
       .map((i, el) => cleanText($(el).text()))
       .get()
-      .filter(text => text.length > 20) // 過濾掉太短的段落
+      .filter(text => text.length > 20)
+      .slice(0, 5) // 只取前 5 個段落
 
-    // 4. 提取列表內容
+    // 4. 提取列表內容（限制數量）
     const lists = mainElement.find('ul li, ol li')
       .map((i, el) => cleanText($(el).text()))
       .get()
       .filter(text => text.length > 10)
+      .slice(0, 3) // 只取前 3 個列表項目
 
     // 5. 組合內容
     mainContent = [
@@ -86,13 +89,14 @@ async function crawlUrl(url) {
       ...lists
     ].filter(text => text.length > 0).join('\n\n')
 
-    // 6. 如果內容太少，嘗試提取其他可能的內容
+    // 6. 如果內容太少，快速提取其他可能的內容
     if (mainContent.length < 200) {
       const additionalContent = mainElement
         .find('div, section')
         .map((i, el) => cleanText($(el).text()))
         .get()
         .filter(text => text.length > 50)
+        .slice(0, 2) // 只取前 2 個額外內容
         .join('\n\n')
 
       if (additionalContent) {
@@ -106,6 +110,14 @@ async function crawlUrl(url) {
       status: 'success'
     }
   } catch (error) {
+    // 如果是超時錯誤，返回部分內容
+    if (error.code === 'ECONNABORTED') {
+      return {
+        url,
+        content: '爬取超時，請稍後重試',
+        status: 'timeout'
+      }
+    }
     return {
       url,
       status: 'error',
