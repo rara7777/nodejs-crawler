@@ -19,14 +19,14 @@ function cleanText(text) {
 // 爬蟲函數
 async function crawlUrl(url) {
   try {
-    // 設置 1 秒超時
+    // 設置 2 秒超時
     const response = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
       },
-      timeout: 1500 // 1.5 秒超時
+      timeout: 2000 // 2 秒超時
     })
     const $ = cheerio.load(response.data)
 
