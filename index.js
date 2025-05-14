@@ -106,6 +106,7 @@ async function crawlUrl(url) {
 
     return {
       url,
+      title,
       content: mainContent,
       status: 'success'
     }
@@ -114,12 +115,14 @@ async function crawlUrl(url) {
     if (error.code === 'ECONNABORTED') {
       return {
         url,
+        title: '',
         content: '爬取超時，請稍後重試',
         status: 'timeout'
       }
     }
     return {
       url,
+      title: '',
       status: 'error',
       error: error.message
     }
