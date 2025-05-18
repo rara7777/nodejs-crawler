@@ -2,10 +2,12 @@
   "name": "crawler",
   "version": "1.0.0",
   "description": "Web crawler API built with Fastify",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "vercel dev"
+    "start": "node dist/index.js",
+    "dev": "tsc -w & vercel dev",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
@@ -18,6 +20,9 @@
     "p-limit": "^3.1.0"
   },
   "devDependencies": {
+    "@types/cheerio": "^0.22.35",
+    "@types/node": "^22.15.18",
+    "typescript": "^5.8.3",
     "vercel": "^32.0.0"
   }
 }
