@@ -3,6 +3,7 @@ import cors from '@fastify/cors'
 import * as cheerio from 'cheerio'
 import axios from 'axios'
 import pLimit from 'p-limit'
+import { IncomingMessage, ServerResponse } from 'http'
 
 const server: FastifyInstance = fastify({ logger: true })
 
@@ -13,8 +14,9 @@ server.register(cors, {
 
 interface CrawlResult {
   url: string
+  title: string
   content?: string
-  status: 'success' | 'error'
+  status: 'success' | 'error' | 'timeout'
   error?: string
 }
 
@@ -33,12 +35,14 @@ function cleanText(text: string): string {
 // 爬蟲函數
 async function crawlUrl(url: string): Promise<CrawlResult> {
   try {
+    // 設置 2 秒超時
     const response = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
-      }
+      },
+      timeout: 2000 // 2 秒超時
     })
     const $ = cheerio.load(response.data)
 
@@ -65,7 +69,7 @@ async function crawlUrl(url: string): Promise<CrawlResult> {
       '.entry-content'
     ]
 
-    let mainElement = null
+    let mainElement: cheerio.Cheerio | null = null
     for (const selector of mainSelectors) {
       const element = $(selector)
       if (element.length > 0) {
@@ -79,17 +83,19 @@ async function crawlUrl(url: string): Promise<CrawlResult> {
       mainElement = $('body')
     }
 
-    // 3. 提取段落文字
+    // 3. 提取段落文字（限制數量）
     const paragraphs = mainElement.find('p')
-      .map((i, el) => cleanText($(el).text()))
+      .map((i: number, el: cheerio.Element) => cleanText($(el).text()))
       .get()
-      .filter(text => text.length > 20) // 過濾掉太短的段落
+      .filter(text => text.length > 20)
+      .slice(0, 5) // 只取前 5 個段落
 
-    // 4. 提取列表內容
+    // 4. 提取列表內容（限制數量）
     const lists = mainElement.find('ul li, ol li')
-      .map((i, el) => cleanText($(el).text()))
+      .map((i: number, el: cheerio.Element) => cleanText($(el).text()))
       .get()
       .filter(text => text.length > 10)
+      .slice(0, 3) // 只取前 3 個列表項目
 
     // 5. 組合內容
     mainContent = [
@@ -99,13 +105,14 @@ async function crawlUrl(url: string): Promise<CrawlResult> {
       ...lists
     ].filter(text => text.length > 0).join('\n\n')
 
-    // 6. 如果內容太少，嘗試提取其他可能的內容
+    // 6. 如果內容太少，快速提取其他可能的內容
     if (mainContent.length < 200) {
       const additionalContent = mainElement
         .find('div, section')
-        .map((i, el) => cleanText($(el).text()))
+        .map((i: number, el: cheerio.Element) => cleanText($(el).text()))
         .get()
         .filter(text => text.length > 50)
+        .slice(0, 2) // 只取前 2 個額外內容
         .join('\n\n')
 
       if (additionalContent) {
@@ -115,12 +122,23 @@ async function crawlUrl(url: string): Promise<CrawlResult> {
 
     return {
       url,
+      title,
       content: mainContent,
       status: 'success'
     }
   } catch (error: any) {
+    // 如果是超時錯誤，返回部分內容
+    if (error.code === 'ECONNABORTED') {
+      return {
+        url,
+        title: '',
+        content: '爬取超時，請稍後重試',
+        status: 'timeout'
+      }
+    }
     return {
       url,
+      title: '',
       status: 'error',
       error: error.message
     }
@@ -129,30 +147,45 @@ async function crawlUrl(url: string): Promise<CrawlResult> {
 
 // API 路由
 server.post('/crawl', async (request: FastifyRequest<{ Body: CrawlRequest }>, reply: FastifyReply) => {
-  const { urls } = request.body
+  try {
+    const { urls } = request.body
 
-  if (!Array.isArray(urls) || urls.length === 0) {
-    return reply.code(400).send({ error: '請提供有效的 URL 陣列' })
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return reply.code(400).send({ error: '請提供有效的 URL 陣列' })
+    }
+
+    // 限制並發請求數量為 3（Vercel 環境下建議降低並發數）
+    const limit = pLimit(3)
+
+    // 並發處理所有 URL
+    const promises = urls.map(url => limit(() => crawlUrl(url)))
+    const results = await Promise.all(promises)
+
+    return { results }
+  } catch (error: any) {
+    server.log.error(error)
+    return reply.code(500).send({
+      error: 'Internal Server Error',
+      message: error.message
+    })
   }
-
-  // 限制並發請求數量為 5
-  const limit = pLimit(5)
-
-  // 並發處理所有 URL
-  const promises = urls.map(url => limit(() => crawlUrl(url)))
-  const results = await Promise.all(promises)
-
-  return { results }
 })
 
-// 啟動服務器
-const start = async () => {
+// 健康檢查端點
+server.get('/health', async () => {
+  return { status: 'ok' }
+})
+
+// 導出 serverless 處理函數
+export default async (req: IncomingMessage, res: ServerResponse) => {
   try {
-    await server.listen({ port: 3000, host: '0.0.0.0' })
-  } catch (err) {
-    server.log.error(err)
-    process.exit(1)
+    await server.ready()
+    server.server.emit('request', req, res)
+  } catch (error: any) {
+    res.statusCode = 500
+    res.end(JSON.stringify({
+      error: 'Internal Server Error',
+      message: error.message
+    }))
   }
 }
-
-start()
